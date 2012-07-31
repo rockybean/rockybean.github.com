@@ -119,3 +119,9 @@ h3{
 .vg { color: #dd7700 } /* Name.Variable.Global */
 .vi { color: #3333bb } /* Name.Variable.Instance */
 .il { color: #0000DD; font-weight: bold } /* Literal.Number.Integer.Long */
+
+/*alfred*/
+p{
+line-height: 180%;
+font-size: 14px;
+}
