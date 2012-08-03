@@ -56,7 +56,8 @@ tags: []
 
 startup方法做的事情很简单，启动一个acceptor线程和多个processor线程，下图是Acceptor和Processor的类图。
 
-![acceptor类图](http://pic.yupoo.com/alfredwei_v/Ca2ow3TZ/qGH1.png)
+![acceptor类图](/assets/images/threadClzDiagram.png)
+
 
 ##AbstractServerThread
 
