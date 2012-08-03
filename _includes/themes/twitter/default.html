@@ -46,6 +46,15 @@
 
       <div class="content">
         {{ content }}
+<script type='text/javascript' charset='utf-8' src='http://open.denglu.cc/connect/commentcode?
+appid=92131denZTpOE619A6095PTIyylyYA&v=1.0.1'></script>
+<script type="text/javascript" charset='utf-8'>
+    var param = {};
+    //param.postid = "<?php the_ID();?>"; // 文章ID
+    param.title = window.location.pathname.split("/")[4]; // 文章标题
+    if(param.title != undefined)
+    	_dl_comment_widget.show(param);
+</script>
       </div>
 
       <footer>
@@ -60,13 +69,4 @@
     {% include JB/analytics %}
   </body>
  
-<script type='text/javascript' charset='utf-8' src='http://open.denglu.cc/connect/commentcode?
-appid=92131denZTpOE619A6095PTIyylyYA&v=1.0.1'></script>
-<script type="text/javascript" charset='utf-8'>
-    var param = {};
-    //param.postid = "<?php the_ID();?>"; // 文章ID
-    param.title = window.location.pathname.split("/")[4]; // 文章标题
-    if(param.title != undefined)
-    	_dl_comment_widget.show(param);
-</script>
 </html>
