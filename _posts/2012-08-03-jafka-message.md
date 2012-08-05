@@ -369,8 +369,8 @@ public enum RequestKeys {
 
 从上面可以看到RequestKeys的类型与类图中Request的子类是一一对应的，Request在传送时都有自己的协议格式，这里以ProducerRequest举例，其协议格式可以在其writeTo方法中获取，另外发送时，ProducerRequest会被封装在一个BoundedByteBufferSend类中，该类会在字节序列中添加消息总长度和request类型这两个基本信息，最终producerRequest的协议格式如下：
 
-|字节数(Byte)|意义|
-|:-------:|:-------:|
+|字节数(Byte)|含义|
+|:----------:|:--:|
 |4|消息长度,length|
 |2|Request类型，对应RequestKeys|
 |2|topic length|
