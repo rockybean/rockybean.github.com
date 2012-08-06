@@ -9,7 +9,7 @@ tags: []
 
 本文讲解Jafka的通信协议，其实就是传输数据的约定格式。
 
-Jafka的通信发生在producer和broker、consumer和broker之间，目前producer和broker之间通信是单向的(producer->broker),consumer和broker之间通信是双向的(consumer<->broker)。主要涉及到的类有Message MessageSet Request Send，下面分别介绍这些类。
+Jafka的通信发生在producer和broker、consumer和broker之间，目前producer和broker之间通信是单向的(producer->broker),consumer和broker之间通信是双向的(consumer<->broker)。主要涉及到的类有Message MessageSet Request Send Receive，下面分别介绍这些类。
 
 ##Message(com.sohu.jafka.message)
 Message类是具体的消息数据，在传递的过程中，其字节序列的组成及含义如下:
@@ -331,19 +331,19 @@ FileMessageSet还有两个方法与消息数据的持久化有关。
 另外FileMessageSet还提供了read方法，可以读取指定offset到offset+limit的所有消息，这里就不贴代码了。
 
 
-##Request
+##Request(com.sohu.jafka.network)
 
-Request是producer consumer与broker通信的顶级封装类，即最终发送与接受的都是该类，下图是其简单的类图：
+Request是producer consumer向broker发出请求的封装类，下图是其简单的类图：
 ![request_clz](/assets/images/request_clz.png)
 
-Request的源码为：
+用户只要实现Request接口，便可以添加自己的Request类，来实现自己的需求。我们来看下Request相关的源码为：
 
 {% highlight java linenos %}
 public interface Request extends ICalculable {
 
 	//请求类型，enum
     RequestKeys getRequestKey();
-	//将该request写入buffer，从这里可以看到request的协议格式
+	//将该request写入buffer，是序列化的过程，从这里可以看到request的协议格式
     void writeTo(ByteBuffer buffer);
 }
 //request 的所有类型
@@ -367,10 +367,10 @@ public enum RequestKeys {
 }
 {% endhighlight %}
 
-从上面可以看到RequestKeys的类型与类图中Request的子类是一一对应的，Request在传送时都有自己的协议格式，这里以ProducerRequest举例，其协议格式可以在其writeTo方法中获取，另外发送时，ProducerRequest会被封装在一个BoundedByteBufferSend类中，该类会在字节序列中添加消息总长度和request类型这两个基本信息，最终producerRequest的协议格式如下：
+从上面可以看到RequestKeys的类型与类图中Request的子类是一一对应的，Request在传送时通过`writeTo(ByteBuffer)`将自身序列化，有自己的协议格式，这里以ProducerRequest举例，其发送时，ProducerRequest会被封装在一个BoundedByteBufferSend类中，该类会在字节序列中添加消息总长度和request类型这两个基本信息，最终producerRequest的协议格式如下：
 
 |字节数(Byte)|含义|
-|:----------:|:--:|
+|:---------:|:----:|
 |4|消息长度,length|
 |2|Request类型，对应RequestKeys|
 |2|topic length|
@@ -391,5 +391,82 @@ public enum RequestKeys {
 其他Request的协议类型，大家可以自行去查看其writeTo方法，这里就不逐个列举了。
 
 
+##Send(com.sohu.jafka.network)
 
+Send类用于封装发送数据，调用自身的write方法，将数据发送到目的地。其类图如下：
+
+![send_clz_diagram](/assets/images/send_clz.png)
+
+我们先来看下Send的源码：
+
+{% highlight java linenos %}
+public interface Send extends Transmission {
+
+//将数据写入channel，返回写入的数据大小。
+    int writeTo(java.nio.channels.GatheringByteChannel channel) throws IOException;
+
+//数据过大时，要分多次写才能完整发送数据，这便是此方法的作用。
+    int writeCompletely(java.nio.channels.GatheringByteChannel channel) throws IOException;
+}
+
+public abstract class AbstractSend extends AbstractTransmission implements Send {
+    public int writeCompletely(GatheringByteChannel channel) throws IOException {
+        int written = 0;
+        while(!complete()) {
+            written += writeTo(channel);
+        }
+        return written;
+    }
+
+}
+{% endhighlight %}
+
+`AbstractSend`实现了writeCompletely方法，实现也很简单，循环检测是否`complete()`，直到全部写完再返回，这也是实际使用中调用的方法，`setCompleted()`实际在writeTo方法中被调用。
+
+从Send子类的类名中我们可以看出其send的类，比如`MessageSetSend`是封装并发送MessageSet的，ByteBufferSend是发送ByteBuffer的，BoundedByteBufferSend类会在传入ByteBuffer对象前面添加4个字节的length，它也可以封装Request对象，前面讲解ProducerRequest格式的时候有提到这一点，此时它还会添加2个字节的request类型数据。send的使用是很简单的，producer发送数据时会用到如下的代码：
+
+{% highlight java linenos %}
+BoundedByteBufferSend send = new BoundedByteBufferSend(request);
+...
+    getOrMakeConnection();
+    int written = -1;
+    try {
+        written = send.writeCompletely(channel);
+    } catch (IOException e) {
+        // no way to tell if write succeeded. Disconnect and re-throw exception to let client handle retry
+        disconnect();
+        throw new RuntimeException(e);
+    } finally {
+        if (logger.isDebugEnabled()) {
+            logger.debug(format("write %d bytes data to %s:%d", written, host, port));
+        }
+    }
+{% endhighlight %}
+
+上述代码可以看到，使用简单，先构造一个Send对象，然后调用其writeCompletely方法即可将数据写入到对应的channel了。Send每个子类这里就不详细介绍了，留给大家自己去研究。
+
+
+##Receive(com.sohu.jafka.network)
+
+Receive类负责从socket中接收数据，其类图如下：
+
+![receive_clz](/assets/images/receive_clz.png)
+
+我们来看看Receive的源码。
+
+{% highlight java linenos %}
+public interface Receive extends Transmission {
+//返回读取到的数据，不包括表示length的4个Byte
+    ByteBuffer buffer();
+//由channel读取数据
+    int readFrom(ReadableByteChannel channel) throws IOException;
+//数据过多时，要多次read才可以，此方法保证一次性读取所有数据
+    int readCompletely(ReadableByteChannel channel) throws IOException;
+}
+{% endhighlight %}
+
+具体方法的含义，大家可以看代码中的注释，其方法与Send接口正好是相对应的，一个读，一个写。BoundedByteBufferReceive是实际中使用的类，其实现也很简单，一个4字节的sizeBuffer读取消息长度，一个contentBuffer用于读取实际的数据，代码这里就不贴了。
+
+##小结
+本文主要讲解了Jafka运行中producer consumer与broker之间通信所遵循的协议及其相关的类，希望对大家理解有所帮助。
 
