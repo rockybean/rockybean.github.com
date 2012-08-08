@@ -1,6 +1,6 @@
 ---
 layout: post
-title: "snowflake简介及核心源码解读"
+title: "snowflake核心源码解读"
 description: ""
 category: 
 tags: []
