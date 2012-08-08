@@ -15,7 +15,15 @@ Snowflake ID有64bits长，由以下三部分组成：
 
 * time---42bits,精确到ms，那就意味着其可以表示长达(2^42-1)/(1000*3600*24*365)=139.5年，另外使用者可以自己定义一个开始纪元（epoch)，然后用(当前时间-开始纪元）算出time，这表示在time这个部分在140年的时间里是不会重复的，官方文档在这里写成了41bits，应该是写错了。另外，这里用time还有一个很重要的原因，就是可以直接更具time进行排序，对于twitter这种更新频繁的应用，时间排序就显得尤为重要了。
 
-* machine id---10bits,该部分其实由datacenterId和workerId两部分组成，这两部分是在配置文件中指明的，另外workerId要注册到zookeeper上，供Snowflake server来检查这几个server是否正常可用，如检查其zookeeper上注册的workerid与其配置的id是否相同，检查该server的时间与这几个server的平均时间是否有10s的误差，如果有，则表示该server有问题，不能启用。另外将workerid注册在zookeeper上，也便于client连接时实现负载均衡。
+* machine id---10bits,该部分其实由datacenterId和workerId两部分组成，这两部分是在配置文件中指明的。
+	
+	* datacenterId的作用(个人看法)	
+
+		1.方便搭建多个生成uid的service，并保证uid不重复，比如在datacenter0将机器0，1，2组成了一个生成uid的service，而datacenter1此时也需要一个生成uid的service，从本中心获取uid显然是最快最方便的，那么它可以在自己中心搭建，只要保证datacenterId唯一。如果没有datacenterId，即用10bits，那么在搭建一个新的service前必须知道目前已经在用的id，否则不能保证生成的id唯一，比如搭建的两个uid service中都有machine id为100的机器，如果其server时间相同，那么产生相同id的情况不可避免。
+
+		2.加快server启动速度。启动一台uid server时，会去检查zk同workerId目录中其他机器的情况，如其在zk上注册的id和向它请求返回的work_id是否相同，是否处同一个datacenter下，另外还会检查该server的时间与目前已有机器的平均时间误差是否在10s范围内等，这些检查是会耗费一定时间的。将一个datacenter下的机器数限制在32台(5bits)以内，在一定程度上也保证了server的启动速度。
+
+	* workerId是实际server机器的代号，最大到32，同一个datacenter下的workerId是不能重复的。它会被注册到zookeeper上，确保workerId未被其他机器占用，并将host:port值存入，注册成功后就可以对外提供服务了。
 
 * sequence id ---12bits,该id可以表示4096个数字，它是在time相同的情况下，递增该值直到为0，即一个循环结束，此时便只能等到下一个ms到来，一般情况下4096/ms的请求是不太可能出现的，所以足够使用了。
 
