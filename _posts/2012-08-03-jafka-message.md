@@ -224,7 +224,7 @@ MessageSet的两个子类从名字上可以看出它们封装消息的来源：�
 
 ByteBufferMessageSet的一个重要接口是遍历消息数据，即其iterator()方法，其实现这里不详细讲了，原理简单和大家说一下。前面提到过一个Message可能是多条消息数据缩后构成的，所以在遍历的时候便存在一个是否要遍历压缩的Message中每条消息数据的问题，其由isShallow参数决定：true不遍历，false遍历。ByteBufferMessageSet的iterator方法是调用的是`return internalIterator(false);`,是会遍历包括压缩Message中的所有消息数据的。实现方式是通过topIter遍历一级Message，当遇到压缩的Message时，将其解压缩并且用innerIter记录其遍历情况，当遍历结束后，回到topIter继续遍历。
 
-ByteBufferMessageSet的writeTo(Channel)的方法代码如下，将数据写入指定的channel。
+ByteBufferMessageSet的writeTo(Channel)的方法代码如下，将数据写入指定的channel。这里的channel是FileChannel，即该方法的调用时机是broker写数据文件，读者独到源码时可以看到。
 
 {% highlight java linenos %}
 public long writeTo(GatheringByteChannel channel, long offset, long maxSize) throws IOException {
