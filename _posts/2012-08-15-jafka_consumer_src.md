@@ -527,7 +527,6 @@ public <T> void startConnections(Iterable<PartitionTopicInfo> topicInfos,Cluster
 
 至此三个问题都解决了，大家对consumer的代码框架应该也了然于胸了吧。
 
-
 ##小结
 
 本文主要讲解了jafka中同步消费和异步消费的源码实现，异步消费是建立在同步消费基础上的高等api，实现了并行消费消息的功能，其实现方式值得大家好好研究。本文只是尝试讲解其代码的脉络，希望对大家有所帮助。
