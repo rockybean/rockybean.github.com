@@ -106,7 +106,7 @@ public void send(ProducerPoolData<V> ppd) {
 
 {% endhighlight %}
 
-该方法通过sync来判断是同步发送还是异步发送，如果是同步发送，则最后调用syncProducer(`1.1.4.1`)，否则调用AsyncProducer发送(1.1.4.2`)。sync是在初始化Producer时，读取`producer.type`的设置来确定，如果为async则表明是异步发送。
+该方法通过sync来判断是同步发送还是异步发送，如果是同步发送，则最后调用syncProducer(`1.1.4.1`)，否则调用AsyncProducer发送(`1.1.4.2`)。sync是在初始化Producer时，读取`producer.type`的设置来确定，如果为async则表明是异步发送。
 
 至此发送消息的过程便完结了，是不是很简单？
 
