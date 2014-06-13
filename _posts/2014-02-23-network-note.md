@@ -113,7 +113,7 @@ FIN: FIN=1表示对端的数据已经发送完毕，要求释放连接。
 
 下面我们来看看建立连接的示意图。[network-tcp-connection.png]
 
-三次握手的详细过程上图已经表现地很详细了，这里不再赘述。这里说一下第三次握手的必要性，即发送方在收到接收方的ack后又主动发送了一次ack给接收方。原因是为了避免一种异常情况：在网络不稳定的情况下，发送方发出的一个连接请求经过在某个网络中间节点滞留，等其到达接收端时正常的通信早已结束，但接收方不知道，所以它会立刻发送一个ack给发送方，如果此时没有第三次握手的确认，那么一个无效的连接就建立起来，造成资源的浪费。
+三次握手的详细过程上图已经表现地很详细了，这里不再赘述。这里说一下第三次握手的必要性，即发送方在收到接收方的ack后又主动发送了一次ack给接收方。原因是为了避免一种异常情况：在网络不稳定的情况下，发送方发出的一个连接请求经过在某个网络中间节点滞留，等其到达接收端时正常的通信早已结束，但接收方不知道，所以它会立刻发送一个ack给发送方，如果此时没有第三次握手的确认，那么服务端会认为该连接有效，造成资源的浪费。
 
 下面再看一下释放链接的示意图。[network-tcp-fin.png]
 
@@ -141,7 +141,7 @@ TCP的状态迁移见下图[network-tcp-status.png]
       图[network-tcp-mss.png]描述了TCP是如何协商mss大小的。注意mss只出现在syn包中。
 
       * 什么是半连接?Syn flood是怎么一回事？
-      半连接是指在服务端接收到客户端的SYN数据包后，会生成一个不完全连接对象存储在半连接队列中，当收到客户端的ack包后会将该对象由半连接队列(syn queue)转移到已连接队列(accept queue)等待accept系统调用处理。这里有两个配置参数要讲，一个是/proc/sys/net/ipv4/tcp_max_syn_backlog，这个指定了半连接队列的最大长度，另一个是sk_max_ack_backlog，该参数指定了全连接队列的最大长度，即完成了三次握手但还没有被accept系统调用取走的连接，一般是listen函数的第二个参数（listen(int sockfd,int backlog)）。
+      半连接是指在服务端接收到客户端的SYN数据包后，会生成一个不完全连接对象存储在半连接队列中，当收到客户端的ack包后会将该对象由半连接队列(syn queue)转移到已连接队列(accept queue)等待accept系统调用处理。这里有两个配置参数要讲，一个是/proc/sys/net/ipv4/tcp_max_syn_backlog，这个指定了半连接队列的最大长度，另一个是sk_max_ack_backlog，该参数指定了全连接队列的最大长度，即完成了三次握手但还没有被accept系统调用取走的连接，一般是listen函数的第二个参数（listen(int sockfd,int backlog)(对应java编程中的new ServerSocket(port,backlog)？)）。
       Syn flood攻击便是利用了半连接队列来实现的，通过伪造大量的tcp SYN数据包，使得对方资源耗尽（CPU满负载或者内存耗尽）。当收到SYN Flood攻击时，服务端的半连接队列会被迅速占满，正常连接会由于半连接队列已满而被丢弃，此时会发现服务端大量连接处于SYN_RECV状态，服务端会不停重试发送ack包给并不存在的客户端，导致cpu满负载，从而达到攻击效果。一般可以通过修改net.ipv4.tcp_synack_retries 来减少重试发送ack的次数、开启 net.ipv4.tcp_syncookies、调大net.ipv4.tcp_max_syn_backlog来进行防御。
       下面2篇文章对半连接都进行了很详细的讲解：[文章一](http://blog.chinaunix.net/uid-20357359-id-1963498.html)和[文章二](http://www.piao2010.com/linux%E8%AF%A1%E5%BC%82%E7%9A%84%E5%8D%8A%E8%BF%9E%E6%8E%A5syn_recv%E9%98%9F%E5%88%97%E9%95%BF%E5%BA%A6%E4%B8%80)
       阿里云在2014年春节期间也遭遇过SYN Flood攻击，[文章链接](http://c.blog.sina.com.cn/profile.php?blogid=e8e60bc089000xcq)
@@ -202,6 +202,12 @@ TCP的状态迁移见下图[network-tcp-status.png]
 
 4. 当收到的TCP报文不是当前tcp列表可处理时，发送RESET包。
 
+5. 当close一个socket时，如果其缓存中还有未处理的待读数据，也会向对方发送RESET包，而不是正常的FIN包。注意，这种情况只在部分系统中出现，参见论文(http://cs.baylor.edu/~donahoo/practical/CSockets/TCPRST.pdf);
+
+ todo：这篇文章讲了写的时候第一次不报错，第二次报错的情况，最后有很好的说明
+ http://wushank.blog.51cto.com/3489095/1135060
+ 
+
 后面两个是参考的其他文章，没有实际测试。
 
 2. connection reset by peer错误
@@ -238,17 +244,86 @@ connection reset是在什么情况出现的？收到了EPIPE等信号吗？
       [参考链接](http://blog.csdn.net/dog250/article/details/13760985)
 
       * 后台TIME_WAIT状态的连接很多是什么原因？怎么解决？TIME_WAIT重用
+      TIME_WAIT存在的原因是tcp为了安全的完成四次握手而关闭连接。四次握手大致分为以下三个步骤：
+      第一，主动关闭方发送FIN包，处于FIN_WAIT1状态，被动方返回ACK包，处于CLOSE_WAIT状态。
+      第二，被动方发送FIN包，处于LAST_ACK状态，主动方返回ACK包，处于TIME_WAIT状态。
+      第三，被动方接收ACK包，处于CLOSED状态。主动方等2MSL一过变为CLOSED状态。
+
+      MSL是Max Segment LifeTime是报文最大生存时间，是指任何报文在地球上存在的最长时间，超过该时间的报文会被丢弃，也就是说在火星上这个时间会变化。RFC规定该时间为2分钟，实际使用一般是30s。
+      假设没有TIME_WAIT这个状态主动方直接CLOSED会出现什么问题呢？
+      由于网络堵塞等原因，主动方在第二个步骤返回的ACK包没有到达被动方，那么被动方会再次发送FIN包，如果这个时候主动关闭方与被动方又重新建立了连接，此时收到FIN包，新连接就会进入4次握手关闭步骤，异常发生。所以TIME_WAIT的存在是有意义，但该状态要持续多久呢？由于tcp规定对于纯ACK包是不能做出反应的，也就是说主动方不能靠再接受ack包来结束TIME_WAIT状态，那就只能设计一个安全时间了，这个时间就是2MSL。如果在该段时间内，主动方还没有收到被动方的FIN包，就可以认定对方已经收到ACK包，之后就可以安心的转为CLOSED状态了。
+      TIME_WAIT虽然确保了连接的安全关闭，但却极大地浪费了端口资源，很多时候处于TIME_WAIT的连接都是可以被立即关闭的。那么如何解决这个问题呢？有两种方法：快速回收和重用。
+
+      1. 快速回收是指在主动关闭方无需等待2个MSL的时间，只需要等待一个重传时间随即释放，通常时间很短。（可参考此处的源码分析http://blog.sina.com.cn/s/blog_781b0c850100znjd.html）
+      快速回收需要配置两个参数，
+      net.tcp_tw_recycle=1 
+      net.tcp_timestamp=1
+      只有当这两者都开启时，快速回收才会起作用。原因是虽然连接被快速回收了，但是有潜在的风险：
+      新建立的连接可能会被重传的FIN包关闭，造成异常。
+      解决该问题的方案是引入ip层的缓存记录。ip层可以缓存连接方的ip和最后tcp通信的时间戳。但下一次同一个ip发送连接请求时(SYN包)，如果满足以下三个条件，则被视为老的重复数据包，被直接丢弃掉。
+      1) 来自同一个ip的tcp请求，且带有时间戳
+      2) 在MSL之内有同一个ip的tcp数据到过
+      3) 新连接的时间戳小于上次最后tcp通信的时间戳，且差值大于重放窗口戳。
+
+      由于判断条件使用了时间戳，所以tcp_timestamp的参数必须打开。 
+      然而当通过NAT网络连接服务端时，会非常容易触发上面三个条件，可以参照七牛的一个分享(http://blog.lidaobing.com/2013/09/14/no-gamble-on-bug.html)。他们就碰到了类似的问题，虽然分享者认为是开了tcp.reuse的问题，但我认为其实应该是开了tcp.recyle导致的。
+      一般不推荐使用该方法解决TIME_WAIT过多的问题，无论是客户端的NAT网络还是服务端的NAT网络，都容易出现时间戳紊乱问题导致SYN被拒绝的情况发生，出现超时等现象。
+
+      2. 重用是指当客户端连接满足一定条件时，服务端可以将处于TIME_WAIT的原连接(四元组)重用。
+      只要满足一下任意一个条件即可发生连接重用，当然前提是四元组信息不能变，也就是要求客户端发起连接的ip和端口都不变。
+
+      1) 新连接的SYN序列号比TIME_WAIT老连接的最后一个序列号要大
+
+      2) 如果开启了net_timestamp，那么新连接的时间戳大于老连接的时间戳
+
+      从上面可以看到tcp_reuse是可以独立使用的，只不过开启了net_timestamp会加大重用的概率。
+
+      还有常被提及的参数tcp_max_tw_buckets，用于控制timewait的连接总数，超过了限制的timewait连接会被删除。简单粗暴，但并不是一个推荐的做法，是有一定风险性的。
+
+      这里还有一个解决方法，就是不要让服务端去主动关闭连接。我们知道TIME_WAIT是出现在主动关闭一方的，所以如果客户端可以主动关闭连接的，那么服务端就可以大量减少TIME_WAIT的连接数了。比如上面七牛碰到的问题最终便是通过开启nginx的keep alive参数来解决的。当然他们tw多得原因是nginx反向代理连接过多导致的，如何配置？？！！！所以要再upstream里面配，注意这里不是配置真正客户端开启keepalive参数。
+
+
+
+      参考 http://blog.csdn.net/dog250/article/details/13760985
+      参考二 http://huoding.com/2013/12/31/316
+      修改参数
+
+      net.ipv4.tcp_tw_reuse tcp重用
+
+      tcp重用和快速回收
+      都可以开启timestamp
+      快速回收一定要开启timestamp，而tcp重用不一定 
+      
+
+
+      tcp_tw_recycle打开导致的问题
+      http://www.pagefault.info/?p=416
+
+      七牛出国由于设置了tcp_tw-reuse出现了问题
+      
+      为什么都是12s延时？
+
+       
 
       * Tcp_No_Delay参数有什么用？什么情况下进行设置？
       tcp_no_delay是指是否使用Nagle算法，true为不使用，反之使用。当希望调用write函数后，数据立马发送，即对实时性要求高时，要将该参数设为true。
 
       * tcp最大连接数怎么提高？
+      除了ulimit -n
+专业一点的，应该是这样：
+http://www.cyberciti.biz/faq/linux-increase-the-maximum-number-of-open-files/
 
+系统级别的用fs.file-max
+
+[217 gryphon]# cat /proc/sys/fs/file-max
+2000000
 
       * RST复位标志在何时发出？
 
         RST: 复位字段被用于当一个报文发送到某个socket接口而出现错误时，TCP则会发出复位报文段。常见出现的情况有以下几种：  www.2cto.com  
         发送到不存在的端口的连接请求：此时对方的目的端口并没有侦听，对于UDP，将会发出ICMP不可达的   错误信息，而对于TCP，将会发出设置RST复位标志位的数据报。异常终止一个连接：正常情况下，通过发送FIN去正常关闭一个TCP连接，但也有可能通过发送一个复位   报文段去中途释放掉一个连接。在socketAPI中通过设置socket选 项SO_LINGER去关闭这种异常关闭的情况。
+
+        当调用close方法时，程序会先讲发送缓冲区中的数据发送完毕，然后进行四次握手关闭，可以通过SO_LINGER来控制该特性。SO_LINGER打开可以在close方法被调用时，能够在设定的范围内尽量将发送缓冲区内的数据发送，如果数据完全发送那么进行四次握手关闭连接，否则直接以RST形式关闭连接，就跟程序异常终止一样。
 
 
 linux常见网络参数意义及优化
@@ -257,6 +332,8 @@ linux常见网络参数意义及优化
 
 
 
+网络编程常见的参数
+http://blog.csdn.net/huang_xw/article/category/1095933
 
 
 
